@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION whenever any file changes.
-const VERSION = 'dy-1';
+const VERSION = 'dy-2';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg',
   'content/course.js', 'content/week01.js', 'content/week02.js', 'content/week03.js', 'content/week04.js',

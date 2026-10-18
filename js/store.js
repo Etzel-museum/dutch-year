@@ -36,9 +36,9 @@
   function logEntry(key = dateKey()) {
     return s.log[key] || (s.log[key] = { sec: 0, reviews: 0, lessons: 0 });
   }
-  function log(kind, n = 1) { logEntry()[kind] += n; save(); }
+  function log(kind, n = 1) { const e = logEntry(); e[kind] = (e[kind] || 0) + n; save(); }
 
-  function active(e) { return e && (e.sec >= 60 || e.reviews > 0 || e.lessons > 0); }
+  function active(e) { return e && (e.sec >= 60 || e.reviews > 0 || e.lessons > 0 || e.practice > 0); }
 
   function streak() {
     const d = new Date();

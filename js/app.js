@@ -67,7 +67,8 @@
 
     p.append(h('div', { class: 'card goal' },
       h('div', { class: 'goal-top' }, h('span', null, 'Today'), h('span', null, `${min} / ${goal} min`)),
-      h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, min / goal * 100)}%` }))));
+      h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, min / goal * 100)}%` })),
+      min >= goal ? h('p', { class: 'small ok-text goal-done' }, 'Daily goal reached! Want more? Keep going with the next lesson or unlimited practice.') : null));
 
     p.append(h('a', { class: 'card step-card' + (due ? '' : ' quiet'), href: '#/review' },
       h('div', { class: 'num' }, '1'),
@@ -87,6 +88,12 @@
       p.append(h('div', { class: 'card' }, h('h3', null, 'All available lessons done!'),
         h('p', { class: 'muted' }, 'More weeks are on the way. Keep up your reviews and listen to something from the Library.')));
     }
+
+    p.append(h('a', { class: 'card step-card', href: '#/practice' },
+      h('div', { class: 'num' }, '3'),
+      h('div', null, h('h3', null, 'Unlimited practice'),
+        h('p', { class: 'muted' }, 'Endless mixed exercises from everything you’ve learned. Keep going as long as you like.')),
+      h('span', { class: 'chev' }, '›')));
 
     // Voices load asynchronously; warn only if none has appeared after a moment.
     setTimeout(() => {
@@ -261,6 +268,7 @@
         d <= 5 ? h('p', { class: 'muted' }, 'New words were added to your review deck.') : null,
         h('div', { class: 'row center' },
           h('a', { class: 'btn ghost', href: `#/week/${n}` }, 'Week overview'),
+          h('a', { class: 'btn ghost', href: '#/practice' }, 'Unlimited practice'),
           nx ? h('a', { class: 'btn primary', href: `#/lesson/${nx.w}/${nx.d}` }, 'Next lesson') : h('a', { class: 'btn primary', href: '#/' }, 'Home')));
     }
 
@@ -364,14 +372,15 @@
     if (!queue.length) {
       stage.append(h('div', { class: 'card done-card' }, h('div', { class: 'big-check' }, icon('check')),
         h('h2', null, 'Nothing to review'), h('p', { class: 'muted' }, 'New cards come from lessons and your phrasebook.'),
-        h('a', { class: 'btn primary', href: '#/' }, 'Home')));
+        h('div', { class: 'row center' }, h('a', { class: 'btn ghost', href: '#/practice' }, 'Unlimited practice'), h('a', { class: 'btn primary', href: '#/' }, 'Home'))));
       return p;
     }
     function draw() {
       if (idx >= queue.length) {
         DY.store.log('reviews', count);
         stage.replaceChildren(h('div', { class: 'card done-card' }, h('div', { class: 'big-check' }, icon('check')),
-          h('h2', null, 'Review done!'), h('p', null, `${count} cards reviewed.`), h('a', { class: 'btn primary', href: '#/' }, 'Home')));
+          h('h2', null, 'Review done!'), h('p', null, `${count} cards reviewed.`),
+          h('div', { class: 'row center' }, h('a', { class: 'btn ghost', href: '#/practice' }, 'Unlimited practice'), h('a', { class: 'btn primary', href: '#/' }, 'Home'))));
         return;
       }
       const id = queue[idx];
@@ -429,6 +438,100 @@
     return p;
   }
   document.addEventListener('keydown', e => main.querySelector('.review-card')?._keys?.(e));
+
+  // ---------- Unlimited practice ----------
+  // Endless mix built from learned words, phrases and exercises of completed lessons.
+  // Doesn't touch the SRS schedule — it's extra practice on top of the daily plan.
+  function practicePool() {
+    const st = S();
+    const words = Object.values(C.words).filter(w => DY.srs.has(w.id));
+    const phrases = st.phrases.filter(p => DY.srs.has('ph:' + p.id));
+    const authored = [];
+    for (const key of Object.keys(st.progress)) {
+      const [w, d] = key.split('-').map(Number);
+      const wk = C.weeks[w];
+      if (!wk) continue;
+      if (d <= 5) authored.push(...(wk.days[d - 1].ex || []));
+      else if (d === 7) authored.push(...wk.test);
+    }
+    return { words, phrases, authored };
+  }
+
+  function makePracticeEx(pool) {
+    const { words, phrases, authored } = pool;
+    const items = [...words, ...phrases];
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    const nouns = words.filter(w => /^(de|het) \S+$/.test(w.nl));
+    const withEx = items.filter(w => w.ex);
+    const kinds = [
+      [authored.length ? 30 : 0, () => pick(authored)],
+      [20, () => {
+        const w = pick(items);
+        const wrong = shuffle(items.filter(x => x.en !== w.en)).slice(0, 3).map(x => x.en);
+        return wrong.length < 2 ? null : { t: 'mc', q: `What does “${w.nl}” mean?`, o: [w.en, ...wrong], a: 0 };
+      }],
+      [15, () => { const w = pick(items); return { t: 'tr', en: w.en, a: [w.nl] }; }],
+      [15, () => { const w = withEx.length && pick(withEx); return w ? { t: 'dict', nl: w.ex, en: w.exEn } : null; }],
+      [nouns.length ? 10 : 0, () => { const w = pick(nouns); const [a, ...rest] = w.nl.split(' '); return { t: 'dehet', w: rest.join(' '), a }; }],
+      [10, () => {
+        const ws = shuffle(items.filter(x => x.en.length < 40)).slice(0, 5);
+        return ws.length < 3 ? null : { t: 'match', pairs: ws.map(x => [x.nl, x.en]) };
+      }],
+      [DY.speech.canListen ? 5 : 0, () => { const w = withEx.length && pick(withEx); return w ? { t: 'speak', nl: w.ex, en: w.exEn } : null; }],
+    ];
+    const total = kinds.reduce((a, k) => a + k[0], 0);
+    for (let tries = 0; tries < 20; tries++) {
+      let r = Math.random() * total;
+      const k = kinds.find(x => (r -= x[0]) < 0) || kinds[1];
+      const ex = k[1]();
+      if (ex) return ex;
+    }
+    return null;
+  }
+
+  function viewPractice() {
+    const pool = practicePool();
+    const p = page('Unlimited practice');
+    if (!pool.words.length && !pool.phrases.length) {
+      p.append(h('div', { class: 'card' }, h('p', null, 'Practice uses what you’ve already learned. Do your first lesson, then come back.'),
+        h('a', { class: 'btn primary', href: '#/lesson/1/1' }, 'Start lesson 1')));
+      return p;
+    }
+    let done = 0, right = 0, run = 0, best = 0;
+    const recent = [];
+    const stats = h('div', { class: 'practice-stats' });
+    const drawStats = () => stats.replaceChildren(
+      h('span', null, h('b', null, done), ' done'), h('span', null, h('b', null, right), ' correct'),
+      h('span', null, h('b', null, run), ' in a row'), h('span', null, 'best ', h('b', null, best)));
+    const stage = h('div');
+    const stop = h('button', { class: 'btn ghost small', type: 'button', onclick: () => {
+      stage.replaceChildren(h('div', { class: 'card done-card' }, h('div', { class: 'big-check' }, icon('check')),
+        h('h2', null, 'Nice session!'),
+        h('p', { class: 'score' }, `${right} / ${done} correct`), h('p', { class: 'muted' }, `Best run: ${best} in a row`),
+        h('div', { class: 'row center' }, h('button', { class: 'btn ghost', type: 'button', onclick: next }, 'Keep going'), h('a', { class: 'btn primary', href: '#/' }, 'Home'))));
+    } }, 'Stop');
+    p.append(h('p', { class: 'muted' }, `Mixed exercises from ${pool.words.length} words, ${pool.phrases.length} phrases and your completed lessons. This doesn’t change your review schedule.`),
+      h('div', { class: 'row between practice-bar' }, stats, stop), stage);
+
+    function next() {
+      let ex;
+      for (let i = 0; i < 10; i++) {
+        ex = makePracticeEx(pool);
+        const key = JSON.stringify(ex);
+        if (ex && !recent.includes(key)) { recent.push(key); if (recent.length > 12) recent.shift(); break; }
+      }
+      if (!ex) return;
+      stage.replaceChildren(DY.ex.render(ex, ok => {
+        if (ok !== null) { done++; if (ok) { right++; run++; best = Math.max(best, run); } else run = 0; DY.store.log('practice'); }
+        drawStats();
+        next();
+        window.scrollTo({ top: 0 });
+      }));
+    }
+    drawStats();
+    next();
+    return p;
+  }
 
   // ---------- Words ----------
   function viewWords() {
@@ -629,7 +732,7 @@
   }
 
   // ---------- Router ----------
-  const STUDY = new Set(['lesson', 'review', 'phrases', 'words']);
+  const STUDY = new Set(['lesson', 'review', 'practice', 'phrases', 'words']);
   let current = '';
 
   function render() {
@@ -644,6 +747,7 @@
       case 'week': node = viewWeek(Number(parts[1])); break;
       case 'lesson': node = viewLesson(Number(parts[1]), Number(parts[2])); break;
       case 'review': node = viewReview(); break;
+      case 'practice': node = viewPractice(); break;
       case 'words': node = viewWords(); break;
       case 'grammar': node = viewGrammar(); break;
       case 'library': node = viewLibrary(); break;
@@ -654,7 +758,7 @@
       default: node = viewToday();
     }
     main.replaceChildren(node);
-    const tab = { today: 'today', course: 'course', week: 'course', lesson: 'course', review: 'review', phrases: 'phrases' }[r] || 'more';
+    const tab = { today: 'today', practice: 'today', course: 'course', week: 'course', lesson: 'course', review: 'review', phrases: 'phrases' }[r] || 'more';
     document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     const due = DY.srs.dueList().length;
     const badge = document.querySelector('.nav .badge');
