@@ -1,0 +1,13 @@
+{
+  "name": "Dutch Year",
+  "short_name": "Dutch Year",
+  "description": "A one-year path from A1 to B1 Dutch, for talking with family.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf8f4",
+  "theme_color": "#e8620c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
